@@ -9,7 +9,7 @@ Here are some links that may help with troubleshooting.
 - [Installation instructions for Windows 10 and Mac OS X](https://cs.hofstra.edu/docs/pages/guides/InstallingPygame.html)
 - [Blank image on Mac OS X](https://github.com/pygame/pygame/issues/1250)
 - [SDL libraries on Mac](http://pygame-users.25799.x6.nabble.com/SDL-for-Pygame-Mac-64-Almost-there-Please-help-td1827.html#a1836)
-- [CGContextDrawImage: invalid context 0x0](CGContextDrawImage: invalid context 0x0)
+- [CGContextDrawImage: invalid context 0x0](https://stackoverflow.com/questions/40210152/pygame-in-macosx-cgcontextdrawimage-invalid-context-0x0)
 
 ## Description
 
