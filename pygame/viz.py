@@ -15,6 +15,32 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 
+click_hand_strings = (               #sized 24x24
+  "     XX                 ",
+  "    X..X                ",
+  "    X..X                ",
+  "    X..X                ",
+  "    X..X                ",
+  "    X..XXX              ",
+  "    X..X..XXX           ",
+  "    X..X..X..XX         ",
+  "    X..X..X..X X        ",
+  "XXX X..X..X..X..X       ",
+  "X..XX........X..X       ",
+  "X...X...........X       ",
+  " X..X...........X       ",
+  "  X.X...........X       ",
+  "  X.............X       ",
+  "   X............X       ",
+  "   X...........X        ",
+  "    X..........X        ",
+  "    X..........X        ",
+  "     X........X         ",
+  "     X........X         ",
+  "     XXXXXXXXXX         ",
+  "                        ",
+  "                        ")
+
 parser = argparse.ArgumentParser(description='Visualize tskit TreeSequence\'s.')
 parser.add_argument("--file", help="Path to .trees file (default None)",
     action="store", default=None)
@@ -85,14 +111,16 @@ ticks_move = 50 # number of ticks for rapidly moving between trees
 clock = pygame.time.Clock()
 screen = pygame.display.set_mode((width, height))
 genome = pygame.Surface((width, genome_height), 0)
-genome_offset = ((0, height-genome_height))
+genome_offset = (0, height-genome_height)
 tree_canvas = pygame.Surface((tree_width, tree_canvas_height), 0)
 tree_offset = ((width - tree_width) // 2, margin)
+click_cursor = pygame.cursors.compile(click_hand_strings)
 
 pygame.display.set_caption('tskit TreeSequence visualization') 
 running = True
 first_pass = True
 ready_for_move = True
+ready_for_click = False
 pressed_ticks = -1
 last_moved_ticks = -1
 while running:
@@ -102,8 +130,9 @@ while running:
             running = False
 
     pressed_keys = pygame.key.get_pressed()
-    if ready_for_move or first_pass:
-        if not (pressed_keys[K_LEFT] and pressed_keys[K_RIGHT]):
+    if ready_for_move or ready_for_click or first_pass:
+        action_taken = False
+        if ready_for_move and not (pressed_keys[K_LEFT] and pressed_keys[K_RIGHT]):
             if pressed_keys[K_LEFT]:
                 if pressed_ticks == -1:
                     pressed_ticks = pygame.time.get_ticks()
@@ -113,6 +142,7 @@ while running:
                     tree_index = 0
                 else:
                     ready_for_move = False
+                    action_taken = True
             if pressed_keys[K_RIGHT]:
                 if pressed_ticks == -1:
                     pressed_ticks = pygame.time.get_ticks()
@@ -122,7 +152,20 @@ while running:
                     tree_index = len(breakpoints) - 2
                 else:
                     ready_for_move = False
-        if not ready_for_move or first_pass:
+                    action_taken = True
+        if ready_for_click and pygame.mouse.get_pressed()[0]:
+            # There has been a mouse click, let's check if it's in the right region
+            mouse_x, mouse_y = pygame.mouse.get_pos()
+            if (mouse_x >= margin and mouse_x <= width - margin) and (mouse_y >= genome_offset[1] + margin / 2 and mouse_y <= height - margin / 2):
+                action_taken = True
+                genome_pos = float(mouse_x - margin) / float(genome_extent) * breakpoints[-1]
+                for i in range(1, len(breakpoints)):
+                    if genome_pos < breakpoints[i]:
+                        assert genome_pos >= breakpoints[i - 1]
+                        tree_index = i - 1
+                        break
+
+        if action_taken or first_pass:
             print("Region ", tree_index, ", [", breakpoints[tree_index], ", ",
                   breakpoints[tree_index+1], ")", sep="")
             for v in variants:
@@ -190,10 +233,19 @@ while running:
     genome_extent = width - 2*margin
     for i, b in enumerate(breakpoints):
         x = int(margin + genome_extent * (b / breakpoints[-1]))
-        if i == tree_index or i == tree_index + 1:
-            vertical_color = RED
-        else:
-            vertical_color = BLACK
+        vertical_color = BLACK
+        tick_size = margin // 2
+        pygame.draw.line(
+            genome,
+            vertical_color,
+            (x, margin - tick_size),
+            (x, margin + tick_size),
+            linewidth)
+    # Go back and draw red vertical lines
+    for i in [tree_index, tree_index + 1]:
+        b = breakpoints[i]
+        x = int(margin + genome_extent * (b / breakpoints[-1]))
+        vertical_color = RED
         tick_size = margin // 2
         pygame.draw.line(
             genome,
@@ -293,9 +345,15 @@ while running:
         )
         screen.blit(text, textRect)
 
+    # Decide whether to show arrow or hand cursor
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+    if (mouse_x >= margin and mouse_x <= width - margin) and (mouse_y >= genome_offset[1] + margin / 2 and mouse_y <= height - margin / 2):
+        pygame.mouse.set_cursor((24, 24), (5, 0), *click_cursor)
+        ready_for_click = not pygame.mouse.get_pressed()[0]
+    else:
+        pygame.mouse.set_cursor(*pygame.cursors.arrow)
+
     pygame.display.flip()
-    # time.sleep(0.1)
-    # clock.tick(60)
     clock.tick(100)
 
 # Done! Time to quit.
