@@ -66,13 +66,12 @@ print("Genome length:", ts.sequence_length)
 print("Navigate with the left / right arrow keys")
 # print(ts.draw_text())
 # print(pygame.font.get_fonts())
-ready_for_press = True
 
 pygame.init()
-width=1000
-height=750
-linewidth=3
-edgelinewidth= linewidth*2 - linewidth % 2
+width = 1000
+height = 750
+linewidth = 3
+edgelinewidth = linewidth*2 - linewidth % 2
 margin = 50
 genome_height = 2*margin # showing genome, positioned at bottom
 tree_index = 0 # starting tree index
@@ -80,6 +79,8 @@ tree_width = 700
 tree_canvas_height = height-genome_height-2*margin
 tree_height = tree_canvas_height - margin
 font_space = 20
+ticks_delay = 500 # number of ticks before starting to rapidly move
+ticks_move = 50 # number of ticks for rapidly moving between trees
 
 clock = pygame.time.Clock()
 screen = pygame.display.set_mode((width, height))
@@ -91,6 +92,9 @@ tree_offset = ((width - tree_width) // 2, margin)
 pygame.display.set_caption('tskit TreeSequence visualization') 
 running = True
 first_pass = True
+ready_for_move = True
+pressed_ticks = -1
+last_moved_ticks = -1
 while running:
     # Did the user click the window close button?
     for event in pygame.event.get():
@@ -98,20 +102,29 @@ while running:
             running = False
 
     pressed_keys = pygame.key.get_pressed()
-    if ready_for_press or first_pass:
-        if pressed_keys[K_LEFT]:
-            ready_for_press = False
-            tree_index -= 1
-            if tree_index < 0:
-                tree_index = 0
-        if pressed_keys[K_RIGHT]:
-            ready_for_press = False
-            tree_index += 1
-            if tree_index >= len(breakpoints) - 1:
-                tree_index = len(breakpoints) - 2
-        if not ready_for_press or first_pass:
-            # print("Region ", tree_index, ", [", breakpoints[tree_index], ", ",
-            #       breakpoints[tree_index+1], ")", sep="")
+    if ready_for_move or first_pass:
+        if not (pressed_keys[K_LEFT] and pressed_keys[K_RIGHT]):
+            if pressed_keys[K_LEFT]:
+                if pressed_ticks == -1:
+                    pressed_ticks = pygame.time.get_ticks()
+                last_moved_ticks = pygame.time.get_ticks()
+                tree_index -= 1
+                if tree_index < 0:
+                    tree_index = 0
+                else:
+                    ready_for_move = False
+            if pressed_keys[K_RIGHT]:
+                if pressed_ticks == -1:
+                    pressed_ticks = pygame.time.get_ticks()
+                last_moved_ticks = pygame.time.get_ticks()
+                tree_index += 1
+                if tree_index >= len(breakpoints) - 1:
+                    tree_index = len(breakpoints) - 2
+                else:
+                    ready_for_move = False
+        if not ready_for_move or first_pass:
+            print("Region ", tree_index, ", [", breakpoints[tree_index], ", ",
+                  breakpoints[tree_index+1], ")", sep="")
             for v in variants:
                 if breakpoints[tree_index] <= v.position and v.position < breakpoints[tree_index + 1]:
                     print("Genotypes ", v.genotypes.tolist(), " from mutation at ", v.position, sep="")
@@ -152,7 +165,18 @@ while running:
             first_pass = False
 
     if not pressed_keys[K_LEFT] and not pressed_keys[K_RIGHT]:
-        ready_for_press = True
+        ready_for_move = True
+        pressed_ticks = -1
+
+    if pressed_keys[K_LEFT] and pressed_keys[K_RIGHT]:
+        ready_for_move = True
+        pressed_ticks = -1
+
+    if pressed_ticks != -1:
+        if last_moved_ticks > pressed_ticks and pygame.time.get_ticks() > last_moved_ticks + ticks_move:
+            ready_for_move = True
+        if last_moved_ticks <= pressed_ticks and pygame.time.get_ticks() > pressed_ticks + ticks_delay:
+            ready_for_move = True
 
     screen.fill(WHITE)
     genome.fill(WHITE)
@@ -271,7 +295,8 @@ while running:
 
     pygame.display.flip()
     # time.sleep(0.1)
-    clock.tick(60)
+    # clock.tick(60)
+    clock.tick(100)
 
 # Done! Time to quit.
 pygame.quit()
