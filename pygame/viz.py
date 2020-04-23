@@ -2,6 +2,7 @@
 """
 
 import argparse
+import numpy as np
 import tskit
 import pygame
 from pygame.locals import *  # TODO: change to selective import
@@ -14,6 +15,19 @@ BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+HIDE_VERTICAL = True
+HIDE_MUTATIONS = True # True
+PRINT_MUTATIONS = False
+ANIMATE_SPR = False  # TODO: add it
+# TODO: hovering on a branch highlights the descendants and shows its extent.
+# TODO: clicking on a branch displays a bitset. Can also print to Terminal
+
+# TODO: options on the UI
+# * jump to position based on text box entry
+# * speed delay of moving left / right
+# * all the current command-line args (length, rho, mu, seed, num_samples)
+# * generate a new simulation
+# * fontsize for sample labels (0 = don't show)
 
 click_hand_strings = (               #sized 24x24
   "     XX                 ",
@@ -54,6 +68,8 @@ parser.add_argument("--sort", help="Whether to sort samples using minlex (1=True
     action="store", default=1, type=int)
 parser.add_argument("--fontsize", help="Font size for labels (default None, dynamically chosen)",
     action="store", default=None, type=int)
+parser.add_argument("--print_polytomies", help="Whether to flag polytomies while doing minlex (1=True, 0=False, default 0)",
+    action="store", default=0, type=int)
 args = parser.parse_args()
 
 print("Command-line args:")
@@ -62,6 +78,7 @@ for k in sorted(args_to_print):
     print(k + ": " + str(args_to_print[k]))
 
 sort_samples = (args.sort != 0)
+print_polytomies = (args.print_polytomies != 0)
 
 if args.file is not None:
     ts = tskit.load(args.file)
@@ -73,6 +90,7 @@ else:
     else:
         seed = args.seed
     print("Your seed is", seed)
+    # TODO: make these command-line arguments
     ts = msprime.simulate(sample_size=args.num_samples, length=args.length, random_seed=seed,
         mutation_rate=1.65e-8, recombination_rate=1.2e-8, Ne=20000)
 if args.fontsize is None:
@@ -83,10 +101,26 @@ if args.fontsize is None:
 else:
     fontsize = args.fontsize
 
-breakpoints = list(ts.breakpoints())
+breakpoints = np.array(list(ts.breakpoints()))
 variants = list(ts.variants())
-trees = ts.aslist()
-max_height = max([tree.time(tree.root) for tree in trees])
+max_height = max([tree.time(tree.root) for tree in ts.trees()])
+
+binned_variants = []
+current_bin_variants = []
+dummy_index = 0
+for v in variants:
+    while v.position > breakpoints[dummy_index + 1]:
+        binned_variants.append(current_bin_variants)
+        dummy_index += 1
+        current_bin_variants = []
+    current_bin_variants.append(v)
+while dummy_index < ts.num_trees:
+    binned_variants.append(current_bin_variants)
+    dummy_index += 1
+    current_bin_variants = []
+assert len(breakpoints) == ts.num_trees + 1
+assert len(binned_variants) == ts.num_trees
+
 print("Max height:", max_height)
 print("Genome length:", ts.sequence_length)
 print("Navigate with the left / right arrow keys")
@@ -96,7 +130,8 @@ print("Navigate with the left / right arrow keys")
 pygame.init()
 width = 1000
 height = 750
-linewidth = 3
+# linewidth = 3
+linewidth = 1
 edgelinewidth = linewidth*2 - linewidth % 2
 margin = 50
 genome_height = 2*margin # showing genome, positioned at bottom
@@ -105,8 +140,8 @@ tree_width = 700
 tree_canvas_height = height-genome_height-2*margin
 tree_height = tree_canvas_height - margin
 font_space = 20
-ticks_delay = 500 # number of ticks before starting to rapidly move
-ticks_move = 50 # number of ticks for rapidly moving between trees
+ticks_delay = 500 # number of ticks before starting to rapidly move, each tick 1 ms
+ticks_move = 50 # number of ticks for rapidly moving between trees, each tick 1 ms
 
 clock = pygame.time.Clock()
 screen = pygame.display.set_mode((width, height))
@@ -159,24 +194,23 @@ while running:
             if (mouse_x >= margin and mouse_x <= width - margin) and (mouse_y >= genome_offset[1] + margin / 2 and mouse_y <= height - margin / 2):
                 action_taken = True
                 genome_pos = float(mouse_x - margin) / float(genome_extent) * breakpoints[-1]
-                for i in range(1, len(breakpoints)):
-                    if genome_pos < breakpoints[i]:
-                        assert genome_pos >= breakpoints[i - 1]
-                        tree_index = i - 1
-                        break
+                tree_index = np.searchsorted(breakpoints, genome_pos, side="right") - 1
 
         if action_taken or first_pass:
-            print("Region ", tree_index, ", [", breakpoints[tree_index], ", ",
-                  breakpoints[tree_index+1], ")", sep="")
-            for v in variants:
-                if breakpoints[tree_index] <= v.position and v.position < breakpoints[tree_index + 1]:
+            region_string = "Region {} of {}, [{:.2f}, {:.2f})".format(
+                tree_index, ts.num_trees, breakpoints[tree_index], breakpoints[tree_index+1])
+            if PRINT_MUTATIONS:
+                print(region_string)
+                for v in binned_variants[tree_index]:
                     print("Genotypes ", v.genotypes.tolist(), " from mutation at ", v.position, sep="")
             node_x_dict = {}
             node_y_dict = {}
             node_parent_dict = {}
-            tree = trees[tree_index]
+            tree = ts.at(breakpoints[tree_index])
             if sort_samples:  # Toggle me!
-                samples = minlex(tree)
+                samples = minlex(tree, print_polytomies)
+                if print_polytomies:
+                    print()
             else:
                 samples = list(tree.samples())
             n = len(samples)
@@ -231,16 +265,18 @@ while running:
         (width - margin, margin),
         linewidth)
     genome_extent = width - 2*margin
-    for i, b in enumerate(breakpoints):
-        x = int(margin + genome_extent * (b / breakpoints[-1]))
-        vertical_color = BLACK
-        tick_size = margin // 2
-        pygame.draw.line(
-            genome,
-            vertical_color,
-            (x, margin - tick_size),
-            (x, margin + tick_size),
-            linewidth)
+    if not HIDE_VERTICAL:
+        for i, b in enumerate(breakpoints):
+            x = int(margin + genome_extent * (b / breakpoints[-1]))
+            vertical_color = BLACK
+            tick_size = margin // 2
+            if i == 0 or i == len(breakpoints) - 1:
+                pygame.draw.line(
+                    genome,
+                    vertical_color,
+                    (x, margin - tick_size),
+                    (x, margin + tick_size),
+                    linewidth)
     # Go back and draw red vertical lines
     for i in [tree_index, tree_index + 1]:
         b = breakpoints[i]
@@ -253,25 +289,26 @@ while running:
             (x, margin - tick_size),
             (x, margin + tick_size),
             linewidth)
-    for v in variants:
-        if breakpoints[tree_index] <= v.position and v.position < breakpoints[tree_index + 1]:
-            mutation_color = RED
-        else:
-            mutation_color = BLACK
-        x = int(margin + genome_extent * (v.position / breakpoints[-1]))
-        cross_size = margin // 6
-        pygame.draw.line(
-            genome,
-            mutation_color,
-            (x - cross_size, margin - cross_size),
-            (x + cross_size, margin + cross_size),
-            linewidth)
-        pygame.draw.line(
-            genome,
-            mutation_color,
-            (x + cross_size, margin - cross_size),
-            (x - cross_size, margin + cross_size),
-            linewidth)
+    if not HIDE_MUTATIONS:
+        for v in variants:
+            if breakpoints[tree_index] <= v.position and v.position < breakpoints[tree_index + 1]:
+                mutation_color = RED
+            else:
+                mutation_color = BLACK
+            x = int(margin + genome_extent * (v.position / breakpoints[-1]))
+            cross_size = margin // 6
+            pygame.draw.line(
+                genome,
+                mutation_color,
+                (x - cross_size, margin - cross_size),
+                (x + cross_size, margin + cross_size),
+                linewidth)
+            pygame.draw.line(
+                genome,
+                mutation_color,
+                (x + cross_size, margin - cross_size),
+                (x - cross_size, margin + cross_size),
+                linewidth)
 
     tree_start = int(margin + genome_extent * (breakpoints[tree_index] / breakpoints[-1]))
     tree_end = int(margin + genome_extent * (breakpoints[tree_index + 1] / breakpoints[-1]))
@@ -283,7 +320,6 @@ while running:
         linewidth)
 
     screen.blit(genome, genome_offset)
-    # tree_canvas.fill(GREEN)
     # Draw the marginal tree!
     for node in node_parent_dict:
         if node == tree.root:
@@ -344,6 +380,16 @@ while running:
             margin + tree_canvas_height + font_space
         )
         screen.blit(text, textRect)
+
+    font = pygame.font.SysFont('arial', 16)
+    text = font.render(region_string, True, BLACK)
+    textRect = text.get_rect()
+    textRect.midleft = (
+        margin, genome_offset[1]
+        # (width - tree_width) // 2 + node_x_dict[sample],
+        # margin + tree_canvas_height + font_space
+    )
+    screen.blit(text, textRect)
 
     # Decide whether to show arrow or hand cursor
     mouse_x, mouse_y = pygame.mouse.get_pos()

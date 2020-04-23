@@ -6,14 +6,14 @@ a release version of tskit, we may no longer need this file.
 """
 import msprime
 
-def helper(tree, node):
+def helper(tree, node, print_polytomies=True):
     children = tree.children(node)
     if len(children) == 0:
         return node, [node]
-    if len(children) != 2:
-        print("That's very interesting, node " + str(node) + " has " + len(children) + " children")
+    if len(children) != 2 and print_polytomies:
+        print("That's very interesting, node " + str(node) + " has " + str(len(children)) + " children")
     # List comprehension for elegance
-    children_return_values = [helper(tree, child) for child in children]
+    children_return_values = [helper(tree, child, print_polytomies) for child in children]
     children_return_values.sort()
     # print(children_return_values)
     min_lexi = []
@@ -21,11 +21,11 @@ def helper(tree, node):
         min_lexi.extend(element[1])
     return children_return_values[0][0], min_lexi
 
-def minlex(tree):
+def minlex(tree, print_polytomies=True):
     """Given a tree, return a list of samples producing this tree that has
     minimum lexicographic order.
     """
-    return helper(tree, tree.root)[1]
+    return helper(tree, tree.root, print_polytomies)[1]
 
 if __name__ == "__main__":
     # Great parameters! Save them
